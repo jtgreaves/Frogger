@@ -1,6 +1,4 @@
-from html import entities
 import random, pygame, os
-from turtle import screensize
 
 pygame.init()
 monitorSize = [pygame.display.Info().current_w, pygame.display.Info().current_h]
@@ -12,6 +10,10 @@ clock = pygame.time.Clock()
 
 current_path = os.path.dirname(__file__)
 assets_path = os.path.join(current_path, 'assets')
+
+courierTitleFont = pygame.font.SysFont('Courier New', 45)
+courierSubFont = pygame.font.SysFont('Courier New', 30)
+
 
 class AbstractEntity: 
 	def spawnEntity(): 
@@ -132,8 +134,6 @@ class LogEntity(AbstractEntity):
 		self.mask = pygame.mask.from_surface(self.imageAsset)
 		self.rect = None
 
-
-
 	def updateEntity(self, player): 
 
 		if self.direction == 1: self.x -= self.speed
@@ -142,19 +142,26 @@ class LogEntity(AbstractEntity):
 		if self.direction == 0 and self.x > screenSize[0] + 250: return True
 		elif self.direction == 1 and self.x < -250: return True
 		
+
+	def checkPlayerCollision(self, player): 
 		if not self.rect == None: 
 			if player.checkCollision(self.rect, self.mask): 
 				player.floating = True
-
+				
 				if self.direction == 1: player.position[0] -= self.speed
 				else: player.position[0] += self.speed
-		
+
+				print("Player now floats")
+				return True 
+			else: return False
+
+
 		# screen.fill((0, 0, 0))
-		olist = self.mask.outline()
-		pygame.draw.lines(screen,(255,0,0),1,olist)
-		olist = player.mask.outline()
-		pygame.draw.lines(screen,(0,255,0),1,olist)
-		pygame.display.update()
+		# olist = self.mask.outline()
+		# pygame.draw.lines(screen,(255,0,0),1,olist)
+		# olist = player.mask.outline()
+		# pygame.draw.lines(screen,(0,255,0),1,olist)
+		# pygame.display.update()
 
 
 
@@ -375,8 +382,6 @@ class WaterRegion(AbstractRegion):
 
 		self.lastSpawn = -200
 
-		self.deathImminent = False  
-
 
 	def updateRegion(self, pos, player):
 		timeDifference = GameScreen.timer - self.lastSpawn
@@ -386,27 +391,33 @@ class WaterRegion(AbstractRegion):
 		elif timeDifference < 500 and random.randint(0,4) == 0 and spawn == False: spawn = True
 		else: spawn = True
 		
-		if spawn == True: 
-			if self.length == None: 
+		if spawn == True:
 				self.lastSpawn = GameScreen.timer
 				self.entities += LogEntity.spawnRandomEntity(self.direction, self.speed) # Not a predefined length
 		
-		for entity in self.entities: entity.updateEntity(player)
 		
-		pixelSize = screenSize[1]//320
-		regionRect = pygame.Rect(0,  (10-pos) * (screenSize[1]//10) + 15*pixelSize, screenSize[0], pixelSize*13)
-		# pygame.draw.rect(screen, (255, 255, 0), regionRect) Displays the water detection region
-		# pygame.display.flip()
+		for entity in self.entities: 
+			if entity.updateEntity(player): self.entities.remove(entity)
 
-		if regionRect.collidepoint(player.position[0] + (screenSize[1]//20), player.position[1] + (screenSize[1]//20)):
-			if player.floating == False:
-				if self.deathImminent: 
-					player.dead()
-					print("Frog couldn't swim")
-				else: 
-					self.deathImminent = True
-			else: self.deathImminent = False 
+	
+	def checkWaterDeath(self, player): 
+		death = True 
+		for entity in self.entities: 
+			if entity.checkPlayerCollision(player): floating = False 
+
 		
+		# pixelSize = screenSize[1]//320
+
+		# regionRect = pygame.Rect(0,  (10-pos) * (screenSize[1]//10) + 15*pixelSize, screenSize[0], pixelSize*12)
+		# if player.checkWaterDeath:			
+		# 	if regionRect.collidepoint(player.position[0] + (screenSize[1]//20), player.position[1] + (screenSize[1]//20)): 
+		# 		print("Player should be x_x")
+			
+		# 	if not entity.checkPlayerCollision(player): player.checkWaterDeath = True
+		# pygame.draw.rect(screen, (255, 255, 0), regionRect) # Displays the water detection region
+		# pygame.draw.circle(screen, (255, 0, 0), (player.position[0] + (screenSize[1]//20), player.position[1] + (screenSize[1]//20)), 2)
+		# pygame.display.flip()
+		return death 
 
 
 
@@ -439,10 +450,14 @@ class Player():
 		self.animationTimer = 0 
 		self.mask = None
 		self.pendingMove = None
+		
 		self.floating = False 
+		self.checkWaterDeath = False 
+		self.waterDeathTimer = 0
 
 		self.alive = True
 		self.lives = 1
+		self.score = 0 
 	
 	def update(self): 
 		self.mask = pygame.mask.from_surface(Player.playerAssets["forwards"])
@@ -461,8 +476,16 @@ class Player():
 	def dead(self): 
 		self.lives -= 1
 
-		if self.lives < 1: self.alive = False 			
+		if self.lives < 1: self.alive = False
 
+	def getRow(self): 
+		tileSize = screenSize[1] // 10 
+		if (self.position[1] - (screenSize[1] - (tileSize))) < 5 and (self.position[1] - (screenSize[1] - (tileSize))) >= 0: return 1
+		elif (self.position[1] - (screenSize[1] - (tileSize * 2))) < 5 and (self.position[1] - (screenSize[1] - (tileSize * 2))) >= 0: return 2
+		elif (self.position[1] - (screenSize[1] - (tileSize * 3))) < 5: return 3
+		else: 
+			print(self.position[1], screenSize[1], tileSize)
+			return None
 
 class AbstractScreen:
 	def updateScreen(self): 
@@ -491,6 +514,12 @@ class GameOverScreen(AbstractScreen):
 
 
 	def drawScreen(self, screen): 
+		text = courierTitleFont.render("Game Over!", True, (255, 255, 255))
+		screen.blit(text, text.get_rect(center=(screenSize[0]//2, screenSize[1]//2 - 25))) 
+		text = courierSubFont.render("Press SPACE to player again", True, (255, 255, 255))
+		screen.blit(text, text.get_rect(center=(screenSize[0]//2, screenSize[1]//2 + 25))) 
+		text = courierSubFont.render("Spress ESC to return to menu", True, (255, 255, 255))
+		screen.blit(text, text.get_rect(center=(screenSize[0]//2, screenSize[1]//2 + 50))) 
 		pass
 	
 	def nextScreen(self):
@@ -615,10 +644,14 @@ class GameScreen(AbstractScreen):
 				self.player.pendingMove[1] -= (screenSize[1]//20)
 				
 				if  self.player.pendingMove[1] < (screenSize[1]//10)*7:
+					self.player.score += 1 
 					self.map.pop(0)
 					self.player.pendingMove[1] += (screenSize[1]//20)*2
+				elif self.player.score < 4: 
+					self.player.score += 1 
 
-				self.player.floating = False 
+				#self.player.floating = False 
+
 
 				
 			elif e.key == pygame.K_a and self.player.alive == True:
@@ -633,7 +666,8 @@ class GameScreen(AbstractScreen):
 				self.player.pendingMove = self.player.position 
 				self.player.pendingMove[0] -= (screenSize[1]//20)
 
-				self.player.floating = False 
+				#self.player.floating = False 
+
 
 
 			elif e.key == pygame.K_s and self.player.alive == True:
@@ -648,7 +682,8 @@ class GameScreen(AbstractScreen):
 				self.player.pendingMove = self.player.position 
 				self.player.pendingMove[1] += (screenSize[1]//20)
 
-				self.player.floating = False 
+				#self.player.floating = False 
+
 
 			elif e.key == pygame.K_d and self.player.alive == True:
 				if not self.player.pendingMove == None: 
@@ -662,14 +697,29 @@ class GameScreen(AbstractScreen):
 				self.player.pendingMove = self.player.position 
 				self.player.pendingMove[0] += (screenSize[1]//20)
 
-				self.player.floating = False 
+				#self.player.floating = False 
+
 
 
 	def updateScreen(self):
 		self.player.update()
 		if len(self.map) < 12: self.generateRegions(self.map)
-
 		for regionNum in range(len(self.map)): self.map[regionNum].updateRegion(regionNum, self.player)
+
+		playerPosition = self.player.getRow()
+		if isinstance(playerPosition, int): 
+			if isinstance(self.map[playerPosition], WaterRegion): 
+				if self.map[playerPosition].checkWaterDeath(self.player): 
+						if self.player.waterDeathTimer > 60:
+							# self.player.dead()
+							pass
+						else:
+							self.player.waterDeathTimer += 1
+				else: 
+					self.player.waterDeathTimer = 0 
+			else: self.player.waterDeathTimer = 0
+						 
+
 
 		if self.player.state == "forwards_jump1" and self.player.animationTimer == 0:
 			self.player.position = self.player.pendingMove
@@ -731,6 +781,9 @@ class GameScreen(AbstractScreen):
 		topBar.set_alpha(75)                # alpha level
 		topBar.fill((0,0,0))
 		screen.blit(topBar, (0,0))  
+
+		scoreText = courierTitleFont.render("Score " + str(self.player.score), True, (255, 255, 255))
+		screen.blit(scoreText, scoreText.get_rect(center=(screenSize[0]//2, screenSize[1]//20))) 
 
 
 	def generateRegions(self, map): # Previous tile based generation
