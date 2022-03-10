@@ -131,7 +131,6 @@ class LogEntity(AbstractEntity):
 		self.direction = direction  
 		self.speed = speed
 
-		self.mask = pygame.mask.from_surface(self.imageAsset)
 		self.rect = None
 
 	def updateEntity(self, player): 
@@ -144,26 +143,11 @@ class LogEntity(AbstractEntity):
 		
 
 	def checkPlayerCollision(self, player): 
-		if not self.rect == None: 
-			if player.checkCollision(self.rect, self.mask): 
-				player.floating = True
-				
-				if self.direction == 1: player.position[0] -= self.speed
-				else: player.position[0] += self.speed
-
-				print("Player now floats")
+		if not self.rect == None:
+			playerArea = pygame.Rect(player.position[0] + (screenSize[1]//20), player.position[1], 1, (screenSize[1]//20))
+			if self.rect.colliderect(playerArea):
 				return True 
-			else: return False
-
-
-		# screen.fill((0, 0, 0))
-		# olist = self.mask.outline()
-		# pygame.draw.lines(screen,(255,0,0),1,olist)
-		# olist = player.mask.outline()
-		# pygame.draw.lines(screen,(0,255,0),1,olist)
-		# pygame.display.update()
-
-
+			else: return False 
 
 	def spawnRandomEntity(direction, speed):
 		entities = []
@@ -381,6 +365,7 @@ class WaterRegion(AbstractRegion):
 		self.speed = speed
 
 		self.lastSpawn = -200
+		self.playerDeath = False 
 
 
 	def updateRegion(self, pos, player):
@@ -401,23 +386,22 @@ class WaterRegion(AbstractRegion):
 
 	
 	def checkWaterDeath(self, player): 
-		death = True 
+		onLog = False 
 		for entity in self.entities: 
-			if entity.checkPlayerCollision(player): floating = False 
-
+			if entity.checkPlayerCollision(player): onLog = True 
 		
-		# pixelSize = screenSize[1]//320
-
-		# regionRect = pygame.Rect(0,  (10-pos) * (screenSize[1]//10) + 15*pixelSize, screenSize[0], pixelSize*12)
-		# if player.checkWaterDeath:			
-		# 	if regionRect.collidepoint(player.position[0] + (screenSize[1]//20), player.position[1] + (screenSize[1]//20)): 
-		# 		print("Player should be x_x")
-			
-		# 	if not entity.checkPlayerCollision(player): player.checkWaterDeath = True
-		# pygame.draw.rect(screen, (255, 255, 0), regionRect) # Displays the water detection region
-		# pygame.draw.circle(screen, (255, 0, 0), (player.position[0] + (screenSize[1]//20), player.position[1] + (screenSize[1]//20)), 2)
-		# pygame.display.flip()
-		return death 
+		if onLog == True: 
+			player.floating = True
+			self.playerDeath = False
+			if self.direction: player.position[0] -= self.speed
+			else: player.position[0] += self.speed
+			return False 
+		else: 
+			player.floating = False
+			if self.playerDeath: 
+				return True
+			else: 
+				self.playerDeath = True 
 
 
 
@@ -452,8 +436,6 @@ class Player():
 		self.pendingMove = None
 		
 		self.floating = False 
-		self.checkWaterDeath = False 
-		self.waterDeathTimer = 0
 
 		self.alive = True
 		self.lives = 1
@@ -631,7 +613,7 @@ class GameScreen(AbstractScreen):
 
 	def handleInput(self, e):
 		if e.type == pygame.KEYDOWN: 
-			if e.key == pygame.K_w and self.player.alive == True: 
+			if (e.key == pygame.K_UP or e.key == pygame.K_w) and self.player.alive == True: 
 				if not self.player.pendingMove == None: 
 					self.player.position = self.player.pendingMove
 					self.player.pendingMove = None
@@ -654,7 +636,7 @@ class GameScreen(AbstractScreen):
 
 
 				
-			elif e.key == pygame.K_a and self.player.alive == True:
+			elif (e.key == pygame.K_LEFT or e.key == pygame.K_a) and self.player.alive == True:
 				if not self.player.pendingMove == None: 
 					self.player.position = self.player.pendingMove
 					self.player.pendingMove = None   
@@ -670,7 +652,7 @@ class GameScreen(AbstractScreen):
 
 
 
-			elif e.key == pygame.K_s and self.player.alive == True:
+			elif (e.key == pygame.K_DOWN or e.key == pygame.K_s) and self.player.alive == True:
 				if not self.player.pendingMove == None: 
 					self.player.position = self.player.pendingMove
 					self.player.pendingMove = None 
@@ -685,7 +667,7 @@ class GameScreen(AbstractScreen):
 				#self.player.floating = False 
 
 
-			elif e.key == pygame.K_d and self.player.alive == True:
+			elif (e.key == pygame.K_RIGHT or e.key == pygame.K_d) and self.player.alive == True:
 				if not self.player.pendingMove == None: 
 					self.player.position = self.player.pendingMove
 					self.player.pendingMove = None   
@@ -710,14 +692,16 @@ class GameScreen(AbstractScreen):
 		if isinstance(playerPosition, int): 
 			if isinstance(self.map[playerPosition], WaterRegion): 
 				if self.map[playerPosition].checkWaterDeath(self.player): 
-						if self.player.waterDeathTimer > 60:
-							# self.player.dead()
-							pass
-						else:
-							self.player.waterDeathTimer += 1
-				else: 
-					self.player.waterDeathTimer = 0 
-			else: self.player.waterDeathTimer = 0
+					self.player.dead()
+			# 	if self.map[playerPosition].checkWaterDeath(self.player): 
+			# 			if self.player.waterDeathTimer > 60:
+			# 				# self.player.dead()
+			# 				pass
+			# 			else:
+			# 				self.player.waterDeathTimer += 1
+			# 	else: 
+			# 		self.player.waterDeathTimer = 0 
+			# else: self.player.waterDeathTimer = 0
 						 
 
 
