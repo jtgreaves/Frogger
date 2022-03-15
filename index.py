@@ -1,4 +1,4 @@
-import random, pygame, os
+import random, pygame, os, sqlite3
 
 pygame.init()
 monitorSize = [pygame.display.Info().current_w, pygame.display.Info().current_h]
@@ -14,6 +14,113 @@ assets_path = os.path.join(current_path, 'assets')
 courierTitleFont = pygame.font.SysFont('Courier New', 45)
 courierSubFont = pygame.font.SysFont('Courier New', 30)
 
+class DatabaseHandler: 
+	def __init__(self):
+		self.conn = DatabaseHandler.loadDatabase("data")
+		self.cur = self.conn.cursor()
+	
+	def loadDatabase(name):
+		conn = sqlite3.connect(name + '.db')
+		cur = conn.cursor()
+
+		tb_exists = "SELECT name FROM sqlite_master WHERE type='table' AND name='playerData'"
+		tb_create = '''CREATE TABLE playerData (
+				playerName tinytext NOT NULL,
+				totalScore int,
+				highScore int,
+				skin tinytext,
+
+				CONSTRAINT playerName PRIMARY KEY (playerName)
+				);'''
+		
+		if not cur.execute(tb_exists).fetchone():
+			cur.execute(tb_create)
+
+		conn.commit()
+		return conn 
+
+	def loadPlayer(self, name):
+		name = name.lower()
+		self.cur.execute("SELECT * FROM playerData WHERE playerName=?", (name, ))
+		results = self.cur.fetchone()
+		
+		if results == None: 
+			return False 
+		else: 
+			return results
+
+	def createPlayer(self, name):
+		name = name.lower()
+		self.cur.execute("SELECT playerName FROM playerData WHERE playerName=?", (name, )).fetchone()
+		results = self.cur.fetchone()
+
+		if results == None: 
+			self.cur.execute("""
+			INSERT INTO table (playerName,totalScore, highScore, skin)
+			VALUES(?, ?, ?, ?);
+			""", (name, 0, 0, "default"))
+			self.conn.comit()
+		else: 
+			return False 		
+
+	def updatePlayer(self, name, intent, value): 
+		name = name.lower()
+
+		if intent == "updateName": 
+			self.cur.execute("SELECT playerName FROM playerData WHERE playerName=?", (name, ))
+			results = self.cur.fetchone()
+			if results == None: 
+				sql = ''' UPDATE playerData
+             		SET playerName = ?
+              		WHERE playerName = ?'''
+				self.cur.execute(sql, (value, name, ))
+				self.conn.commit()
+				return True 
+			else:
+				return False 
+
+		elif intent == "totalScoreIncrement": 
+			self.cur.execute("SELECT totalScore FROM playerData WHERE playerName=?", (name, ))
+			results = self.cur.fetchone()
+			if results != None: 
+				sql = ''' UPDATE playerData
+             		SET totalScore = ?
+              		WHERE playerName = ?'''
+				self.cur.execute(sql, ((value + results[0]), name, ))
+				self.conn.commit()
+				return True 
+			else:
+				return False 
+		elif intent == "highScoreUpdate": 
+			self.cur.execute("SELECT playerName FROM playerData WHERE playerName=?", (name, ))
+			results = self.cur.fetchone()
+			if results != None: 
+				sql = ''' UPDATE playerData
+             		SET highScore = ?
+              		WHERE playerName = ?'''
+				self.cur.execute(sql, (value, name, ))
+				self.conn.commit()
+				return True 
+			else:
+				return False 
+		
+		elif intent == "currentSkin": 
+			self.cur.execute("SELECT playerName FROM playerData WHERE playerName=?", (name, ))
+			results = self.cur.fetchone()
+			if results != None: 
+				sql = ''' UPDATE playerData
+             		SET skin = ?
+              		WHERE playerName = ?'''
+				self.cur.execute(sql, (value, name, ))
+				self.conn.commit()
+				return True 
+			else:
+				return False 
+		
+
+	def closeConnection(self):
+		self.conn.commit()
+		self.conn.close()
 
 class AbstractEntity: 
 	def spawnEntity(): 
@@ -458,7 +565,8 @@ class Player():
 	def dead(self): 
 		self.lives -= 1
 
-		if self.lives < 1: self.alive = False
+		if self.lives < 1: 
+			self.alive = False
 
 	def getRow(self): 
 		tileSize = screenSize[1] // 10 
@@ -466,7 +574,7 @@ class Player():
 		elif (self.position[1] - (screenSize[1] - (tileSize * 2))) < 5 and (self.position[1] - (screenSize[1] - (tileSize * 2))) >= 0: return 2
 		elif (self.position[1] - (screenSize[1] - (tileSize * 3))) < 5: return 3
 		else: 
-			print(self.position[1], screenSize[1], tileSize)
+			# print(self.position[1], screenSize[1], tileSize)
 			return None
 
 class AbstractScreen:
@@ -500,7 +608,7 @@ class GameOverScreen(AbstractScreen):
 		screen.blit(text, text.get_rect(center=(screenSize[0]//2, screenSize[1]//2 - 25))) 
 		text = courierSubFont.render("Press SPACE to player again", True, (255, 255, 255))
 		screen.blit(text, text.get_rect(center=(screenSize[0]//2, screenSize[1]//2 + 25))) 
-		text = courierSubFont.render("Spress ESC to return to menu", True, (255, 255, 255))
+		text = courierSubFont.render("Press ESC to return to menu", True, (255, 255, 255))
 		screen.blit(text, text.get_rect(center=(screenSize[0]//2, screenSize[1]//2 + 50))) 
 		pass
 	
@@ -536,6 +644,7 @@ class GameScreen(AbstractScreen):
 		self.map = []
 		self.mapDimensions = [int(screenSize[0] // (screenSize[1]//10)), 10]
 		self.player = Player()
+		self.playerData = database.loadPlayer(currentPlayer)
 		self.pause = False 
 
 		self.gameOver = False
@@ -610,7 +719,6 @@ class GameScreen(AbstractScreen):
 			"T2": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'logs', 'T2.png')), (screenSize[1]//10, screenSize[1]//10)).convert_alpha()
 		}
 
-
 	def handleInput(self, e):
 		if e.type == pygame.KEYDOWN: 
 			if (e.key == pygame.K_UP or e.key == pygame.K_w) and self.player.alive == True: 
@@ -678,10 +786,6 @@ class GameScreen(AbstractScreen):
 
 				self.player.pendingMove = self.player.position 
 				self.player.pendingMove[0] += (screenSize[1]//20)
-
-				#self.player.floating = False 
-
-
 
 	def updateScreen(self):
 		self.player.update()
@@ -769,7 +873,6 @@ class GameScreen(AbstractScreen):
 		scoreText = courierTitleFont.render("Score " + str(self.player.score), True, (255, 255, 255))
 		screen.blit(scoreText, scoreText.get_rect(center=(screenSize[0]//2, screenSize[1]//20))) 
 
-
 	def generateRegions(self, map): # Previous tile based generation
 		chance = random.randint(0, 100)
 		if len(map) == 0:
@@ -801,7 +904,11 @@ class GameScreen(AbstractScreen):
 			else: map += SafeRegion.spawnRegion(self.mapDimensions[0])
 	
 	def nextScreen(self):
-		if self.gameOver == True and self.fade >= 125: 
+		if self.gameOver == True and self.fade >= 125:
+			if self.playerData[2] < self.player.score: 
+				database.updatePlayer(currentPlayer, "highScoreUpdate", self.player.score)
+			database.updatePlayer(currentPlayer, "totalScoreIncrement", self.player.score)
+			
 			return GameOverScreen()
 		elif self.pause == True: 
 			self.pause = False 
@@ -831,6 +938,10 @@ currentScreen = StartScreen()
 
 fullScreen = False
 resizeHeight = False
+
+database = DatabaseHandler()
+database.updatePlayer("test", "totalScoreIncrement", 50)
+currentPlayer = "default"
 
 while endProgram == False:
 	for e in pygame.event.get():
@@ -874,5 +985,6 @@ while endProgram == False:
 	pygame.display.flip()
 	clock.tick(30)
 
+database.closeConnection()
 pygame.quit()
 quit()
