@@ -13,6 +13,7 @@ assets_path = os.path.join(current_path, 'assets')
 
 courierTitleFont = pygame.font.SysFont('Courier New', 45)
 courierSubFont = pygame.font.SysFont('Courier New', 30)
+fixedsysSubFont = pygame.font.SysFont('Fixedsys Regular', 50)
 
 class DatabaseHandler: 
 	def __init__(self):
@@ -29,6 +30,8 @@ class DatabaseHandler:
 				totalScore int,
 				highScore int,
 				skin tinytext,
+				coins float,
+				totalGamesPlayed numeric,
 
 				CONSTRAINT playerName PRIMARY KEY (playerName)
 				);'''
@@ -38,6 +41,13 @@ class DatabaseHandler:
 
 		conn.commit()
 		return conn 
+	
+	def initiatePlayer(self, name):
+		name = name.lower()
+		self.cur.execute("SELECT playerName FROM playerData WHERE playerName=?", (name, ))
+		results = self.cur.fetchone()
+		if results == None: 
+			self.createPlayer(name)
 
 	def loadPlayer(self, name):
 		name = name.lower()
@@ -51,15 +61,15 @@ class DatabaseHandler:
 
 	def createPlayer(self, name):
 		name = name.lower()
-		self.cur.execute("SELECT playerName FROM playerData WHERE playerName=?", (name, )).fetchone()
+		self.cur.execute("SELECT playerName FROM playerData WHERE playerName=?", (name, ))
 		results = self.cur.fetchone()
 
 		if results == None: 
 			self.cur.execute("""
-			INSERT INTO table (playerName,totalScore, highScore, skin)
-			VALUES(?, ?, ?, ?);
-			""", (name, 0, 0, "default"))
-			self.conn.comit()
+			INSERT INTO playerData (playerName, totalScore, highScore, skin, coins, totalGamesPlayed)
+			VALUES(?, ?, ?, ?, ?, ?);
+			""", (name, 0, 0, "default", 0, 0))
+			self.conn.commit()
 		else: 
 			return False 		
 
@@ -116,6 +126,45 @@ class DatabaseHandler:
 				return True 
 			else:
 				return False 
+
+		elif intent == "totalGamesIncrement": 
+			self.cur.execute("SELECT playerName, totalGamesPlayed FROM playerData WHERE playerName=?", (name, ))
+			results = self.cur.fetchone()
+			if results != None: 
+				sql = ''' UPDATE playerData
+			 		SET totalGamesPlayed = ?
+			  		WHERE playerName = ?'''
+				self.cur.execute(sql, ((value + results[1]), name, ))
+				self.conn.commit()
+				return True 
+			else:
+				return False
+
+		elif intent == "coinsAddition": 
+			self.cur.execute("SELECT playerName, coins FROM playerData WHERE playerName=?", (name, ))
+			results = self.cur.fetchone()
+			if results != None:
+				sql = ''' UPDATE playerData
+					SET coins = ?
+					WHERE playerName = ?'''
+				self.cur.execute(sql, ((value + results[1]), name, ))
+				self.conn.commit()
+				return True
+			else:
+				return False
+
+		elif intent == "coinsSubtraction": 
+			self.cur.execute("SELECT playerName, coins FROM playerData WHERE playerName=?", (name, ))
+			results = self.cur.fetchone()
+			if results != None:
+				sql = ''' UPDATE playerData
+					SET coins = ?
+					WHERE playerName = ?'''
+				self.cur.execute(sql, ((results[1] - value), name, ))
+				self.conn.commit()
+				return True
+			else:
+				return False
 		
 
 	def closeConnection(self):
@@ -132,6 +181,51 @@ class AbstractEntity:
 	def drawEntity(self, pos): 
 		pass
 
+class TractorEntity(AbstractEntity):
+	entityAssets = [] 
+
+	def __init__(self, imageAsset, entityX, direction):
+		self.x = entityX
+		self.direction = direction
+		self.imageAsset = imageAsset
+		self.speed = screenSize[0]//(2 * 30) # 5 being speed; 30 being refresh rate
+		self.mask = pygame.mask.from_surface(self.imageAsset)
+		self.rect = None
+
+	def spawnOriginEntities(): 
+		direction = random.randint(0,1)
+		if direction == 0: entityX = random.randint(200, 350)
+		else: entityX = screenSize[0] - 100 - random.randint(200, 350)
+		
+		imageAsset = TractorEntity.entityAssets[direction][random.randint(0,3)]
+		
+		return TractorEntity(imageAsset, entityX, direction)
+
+	def spawnEntity():
+		direction = random.randint(0,1)
+		if direction == 0: entityX = -250
+		else: entityX = screenSize[0] + 250		
+		assetNumber = random.randint(0,3)	
+	
+		imageAsset = TractorEntity.entityAssets[direction][assetNumber]
+		return TractorEntity(imageAsset, entityX, direction)
+
+	def updateEntity(self, player):
+		if self.direction == 0: self.x += self.speed
+		else: self.x -= self.speed
+
+		if self.x < -250 or self.x > screenSize[0] + 250: 
+			return 1 # Remove entity 
+		
+		if not self.rect == None: 
+			if player.checkCollision(self.rect, self.mask):
+				player.state = "dead" 
+				player.dead()
+
+	def drawEntity(self, pos):
+		self.rect = screen.blit(self.imageAsset, (self.x, screenSize[1] - (pos * (screenSize[1] // 10))))
+		
+
 class CarEntity(AbstractEntity): 
 	entityAssets = []
 	
@@ -147,7 +241,13 @@ class CarEntity(AbstractEntity):
 	def spawnEntity(laneDirection):
 		if laneDirection == 0: entityX = -100
 		else: entityX = screenSize[0]		
-		imageAsset = CarEntity.entityAssets[laneDirection][random.randint(0,3)]
+
+		chance = random.randint(0,50)
+
+		if chance < 10: assetNumber = random.randint(3,7) # 1/5 chance of spawning a lorry  
+		else: assetNumber = random.randint(0, 3) # The rest of the time, spawn a car 
+		
+		imageAsset = CarEntity.entityAssets[laneDirection][assetNumber]
 
 		return CarEntity(imageAsset, entityX, laneDirection)
 
@@ -277,9 +377,6 @@ class LogEntity(AbstractEntity):
 	def drawEntity(self, pos):
 		self.rect = screen.blit(self.imageAsset, (self.x, screenSize[1] - (pos * (screenSize[1] // 10))))
 
-		
-		
-
 class AbstractRegion:
 	def updateRegion(self):
 		pass 
@@ -381,9 +478,9 @@ class RoadRegion(AbstractRegion):
 		return lanes 
 
 	def updateRegion(self, pos, player):
-		if GameScreen.timer - self.lastSpawn > 5 and random.randint(0, 50) == 0:
+		if FreePlay_GameScreen.timer - self.lastSpawn > 5 and random.randint(0, 50) == 0:
 			self.entities.append(CarEntity.spawnEntity(self.direction))
-			self.lastSpawn = GameScreen.timer
+			self.lastSpawn = FreePlay_GameScreen.timer
 		
 		for entity in self.entities: 
 			if entity.updateEntity(player) == 1: self.entities.remove(entity)
@@ -433,8 +530,8 @@ class RailRegion(AbstractRegion):
 				self.entities = TrainEntity.spawnEntity()
 			
 		elif random.randint(0, 100) == 0:
-		# elif GameScreen.timer - self.lastSpawn > 0:
-			self.trainDelcared = GameScreen.timer
+		# elif FreePlay_GameScreen.timer - self.lastSpawn > 0:
+			self.trainDelcared = FreePlay_GameScreen.timer
 			self.incomingTrain = True 
 		
 		for entity in self.entities: 
@@ -442,7 +539,7 @@ class RailRegion(AbstractRegion):
 				self.entities.remove(entity)
 
 				# Clear Variables
-				self.lastSpawn = GameScreen.timer
+				self.lastSpawn = FreePlay_GameScreen.timer
 				self.incomingTrain = False 
 				self.trainArrived = False 
 				self.alertsActive = False 
@@ -458,6 +555,29 @@ class RailRegion(AbstractRegion):
 
 	def spawnRegion(mapWidth):
 		return [RailRegion(mapWidth)]
+
+class TractorRegion(AbstractRegion): 
+	tileAsset = None
+
+	def __init__(self, mapWidth): 
+		self.lastSpawn = 0 # Since the last train passed
+		self.entities = []
+		self.regionWidth = mapWidth
+
+	def updateRegion(self, pos, player):
+		if len(self.entities) == 0:
+			self.entities.append(TractorEntity.spawnEntity())
+			self.lastSpawn = FreePlay_GameScreen.timer
+		
+		for entity in self.entities: 
+			if entity.updateEntity(player): self.entities.remove(entity)
+
+	def drawRegion(self, pos):
+		for tileNum in range(self.regionWidth): screen.blit(TractorRegion.tileAsset, (((screenSize[0] // self.regionWidth) * tileNum), screenSize[1] - (pos * (screenSize[1] // 10))))
+		for entity in self.entities: entity.drawEntity(pos)
+
+	def spawnRegion(mapWidth):
+		return [SafeRegion(mapWidth), TractorRegion(mapWidth), SafeRegion(mapWidth)]
 
 class WaterRegion(AbstractRegion):
 	tileAssets = []
@@ -476,7 +596,7 @@ class WaterRegion(AbstractRegion):
 
 
 	def updateRegion(self, pos, player):
-		timeDifference = GameScreen.timer - self.lastSpawn
+		timeDifference = FreePlay_GameScreen.timer - self.lastSpawn
 		spawn = False 
 		if timeDifference < 80: pass 
 		elif timeDifference < 250 and random.randint(0,6) == 0 and spawn == False: spawn = True
@@ -484,9 +604,8 @@ class WaterRegion(AbstractRegion):
 		else: spawn = True
 		
 		if spawn == True:
-				self.lastSpawn = GameScreen.timer
-				self.entities += LogEntity.spawnRandomEntity(self.direction, self.speed) # Not a predefined length
-		
+			self.lastSpawn = FreePlay_GameScreen.timer
+			self.entities += LogEntity.spawnRandomEntity(self.direction, self.speed) # Not a predefined length
 		
 		for entity in self.entities: 
 			if entity.updateEntity(player): self.entities.remove(entity)
@@ -573,9 +692,7 @@ class Player():
 		if (self.position[1] - (screenSize[1] - (tileSize))) < 5 and (self.position[1] - (screenSize[1] - (tileSize))) >= 0: return 1
 		elif (self.position[1] - (screenSize[1] - (tileSize * 2))) < 5 and (self.position[1] - (screenSize[1] - (tileSize * 2))) >= 0: return 2
 		elif (self.position[1] - (screenSize[1] - (tileSize * 3))) < 5: return 3
-		else: 
-			# print(self.position[1], screenSize[1], tileSize)
-			return None
+		else: return None
 
 class AbstractScreen:
 	def updateScreen(self): 
@@ -591,9 +708,11 @@ class AbstractScreen:
 		return self
 
 class GameOverScreen(AbstractScreen): 
-	def __init__(self): 
+	def __init__(self, coins, currentPlayer): 
 		self.restartGame = False
 		self.exit = False
+		self.coinsEarned = coins
+		self.currentPlayer = currentPlayer
 
 	def handleInput(self, e):
 		if e.type == pygame.KEYDOWN: 
@@ -605,16 +724,18 @@ class GameOverScreen(AbstractScreen):
 
 	def drawScreen(self, screen): 
 		text = courierTitleFont.render("Game Over!", True, (255, 255, 255))
-		screen.blit(text, text.get_rect(center=(screenSize[0]//2, screenSize[1]//2 - 25))) 
+		screen.blit(text, text.get_rect(center=(screenSize[0]//2, screenSize[1]//10 * 3))) 
+		text = courierTitleFont.render("Coins: " + str(self.coinsEarned), True, (255, 255, 255))
+		screen.blit(text, text.get_rect(center=(screenSize[0]//2, screenSize[1]//10 * 4))) 
 		text = courierSubFont.render("Press SPACE to player again", True, (255, 255, 255))
-		screen.blit(text, text.get_rect(center=(screenSize[0]//2, screenSize[1]//2 + 25))) 
+		screen.blit(text, text.get_rect(center=(screenSize[0]//2, screenSize[1]//10 * 6))) 
 		text = courierSubFont.render("Press ESC to return to menu", True, (255, 255, 255))
-		screen.blit(text, text.get_rect(center=(screenSize[0]//2, screenSize[1]//2 + 50))) 
+		screen.blit(text, text.get_rect(center=(screenSize[0]//2, screenSize[1]//10 * 6.5))) 
 		pass
 	
 	def nextScreen(self):
-		if self.restartGame: return GameScreen()
-		elif self.exit: return StartScreen()
+		if self.restartGame: return FreePlay_GameScreen(self.currentPlayer)
+		elif self.exit: return StartScreen(self.currentPlayer)
 		
 		return self 
 		
@@ -636,15 +757,17 @@ class PausedScreen(AbstractScreen):
 		
 		return self 
 
-class GameScreen(AbstractScreen):
+class FreePlay_GameScreen(AbstractScreen):
 	timer = 0 
 
-	def __init__(self):
-		GameScreen.loadAssets(self)
+	def __init__(self, currentPlayer):
+		self.playerData = database.loadPlayer(currentPlayer)
+		self.currentPlayer = currentPlayer
+		FreePlay_GameScreen.loadAssets(self)
+		
 		self.map = []
 		self.mapDimensions = [int(screenSize[0] // (screenSize[1]//10)), 10]
 		self.player = Player()
-		self.playerData = database.loadPlayer(currentPlayer)
 		self.pause = False 
 
 		self.gameOver = False
@@ -654,22 +777,23 @@ class GameScreen(AbstractScreen):
 		# Asset loading 
 		SafeRegion.tileAssets = [pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'tiles', 'SafeRegion', '0.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'tiles', 'SafeRegion', '1.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'tiles', 'SafeRegion', '2.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'tiles', 'SafeRegion', '3.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'tiles', 'SafeRegion', '4.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'tiles', 'SafeRegion', '5.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'tiles', 'SafeRegion', '6.png')), (screenSize[1]//10, screenSize[1]//10))] # Loads here, once the scale for the window has been locked
 		WaterRegion.tileAssets = [pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'tiles', 'WaterRegion', '0.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'tiles', 'WaterRegion', '1.png')), (screenSize[1]//10, screenSize[1]//10))]		
+		TractorRegion.tileAsset = pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'tiles', 'TractorRegion', '0.png')), (screenSize[1]//10, screenSize[1]//10))	
 		
 		Player.playerAssets = {
-		"forwards": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', 'forwards.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10)),
-		"forwards_jump1": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', 'forwards_jump1.png')), (screenSize[1]//10, screenSize[1]//10)),
-		"forwards_jump2": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', 'forwards_jump2.png')), (screenSize[1]//10, screenSize[1]//10)),
-		"backwards": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', 'backwards.png')), (screenSize[1]//10, screenSize[1]//10)),
-		"backwards_jump1": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', 'backwards_jump1.png')), (screenSize[1]//10, screenSize[1]//10)),
-		"backwards_jump2": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', 'backwards_jump2.png')), (screenSize[1]//10, screenSize[1]//10)),
-		"forwards_tongue": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', 'forwards_tongue.png')), (screenSize[1]//10, screenSize[1]//10)),
-		"dead": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', 'dead.png')), (screenSize[1]//10, screenSize[1]//10)),
-		"right": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', 'right.png')), (screenSize[1]//10, screenSize[1]//10)),
-		"right_jump1": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', 'right_jump1.png')), (screenSize[1]//10, screenSize[1]//10)),
-		"right_jump2": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', 'right_jump2.png')), (screenSize[1]//10, screenSize[1]//10)),
-		"left": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', 'left.png')), (screenSize[1]//10, screenSize[1]//10)),
-		"left_jump1": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', 'left_jump1.png')), (screenSize[1]//10, screenSize[1]//10)),
-		"left_jump2": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', 'left_jump2.png')), (screenSize[1]//10, screenSize[1]//10))
+		"forwards": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', self.playerData[3], 'forwards.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10)),
+		"forwards_jump1": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', self.playerData[3], 'forwards_jump1.png')), (screenSize[1]//10, screenSize[1]//10)),
+		"forwards_jump2": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', self.playerData[3], 'forwards_jump2.png')), (screenSize[1]//10, screenSize[1]//10)),
+		"backwards": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', self.playerData[3], 'backwards.png')), (screenSize[1]//10, screenSize[1]//10)),
+		"backwards_jump1": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', self.playerData[3], 'backwards_jump1.png')), (screenSize[1]//10, screenSize[1]//10)),
+		"backwards_jump2": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', self.playerData[3], 'backwards_jump2.png')), (screenSize[1]//10, screenSize[1]//10)),
+		"forwards_tongue": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', self.playerData[3], 'forwards_tongue.png')), (screenSize[1]//10, screenSize[1]//10)),
+		"dead": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', self.playerData[3], 'dead.png')), (screenSize[1]//10, screenSize[1]//10)),
+		"right": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', self.playerData[3], 'right.png')), (screenSize[1]//10, screenSize[1]//10)),
+		"right_jump1": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', self.playerData[3], 'right_jump1.png')), (screenSize[1]//10, screenSize[1]//10)),
+		"right_jump2": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', self.playerData[3], 'right_jump2.png')), (screenSize[1]//10, screenSize[1]//10)),
+		"left": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', self.playerData[3], 'left.png')), (screenSize[1]//10, screenSize[1]//10)),
+		"left_jump1": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', self.playerData[3], 'left_jump1.png')), (screenSize[1]//10, screenSize[1]//10)),
+		"left_jump2": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', self.playerData[3],  'left_jump2.png')), (screenSize[1]//10, screenSize[1]//10))
 		}
 
 		RoadRegion.tileAssets = {
@@ -710,7 +834,7 @@ class GameScreen(AbstractScreen):
 
 		# Asset Loading - Entities 
 		CarEntity.entityAssets = [[pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'right', '0.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'right', '1.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'right', '2.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'right', '3.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'right', '3.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'right', '4.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'right', '5.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'right', '6.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'right', '7.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10))], [pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'left', '0.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'left', '1.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'left', '2.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'left', '3.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'left', '4.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'left', '5.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'left', '6.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10)) ,pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'left', '7.png')).convert_alpha(), (screenSize[1]//10, screenSize[1]//10))]]	
-		# CarEntity.entityAssets = [[pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'right', '0.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'right', '1.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'right', '2.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'right', '3.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'right', '3.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'right', '4.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'right', '5.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'right', '6.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'right', '7.png')), (screenSize[1]//10, screenSize[1]//10))], [pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'left', '0.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'left', '1.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'left', '2.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'left', '3.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'left', '4.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'left', '5.png')), (screenSize[1]//10, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'left', '6.png')), (screenSize[1]//10, screenSize[1]//10)) ,pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'cars', 'left', '7.png')), (screenSize[1]//10, screenSize[1]//10))]]	
+		TractorEntity.entityAssets = [[pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'tractor', 'right', '0.png')).convert_alpha(), (screenSize[1]//5, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'tractor', 'right', '1.png')).convert_alpha(), (screenSize[1]//5, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'tractor', 'right', '2.png')).convert_alpha(), (screenSize[1]//5, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'tractor', 'right', '3.png')).convert_alpha(), (screenSize[1]//5, screenSize[1]//10))], [pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'tractor', 'left', '0.png')).convert_alpha(), (screenSize[1]//5, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'tractor', 'left', '1.png')).convert_alpha(), (screenSize[1]//5, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'tractor', 'left', '2.png')).convert_alpha(), (screenSize[1]//5, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'tractor', 'left', '3.png')).convert_alpha(), (screenSize[1]//5, screenSize[1]//10))]]
 		TrainEntity.entityAssets = [[pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'rail', 'right', '0.png')), (screenSize[1]//5, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'rail', 'right', '1.png')), (screenSize[1]//5, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'rail', 'right', '2.png')), (screenSize[1]//5, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'rail', 'right', '3.png')), (screenSize[1]//5, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'rail', 'right', '4.png')), (screenSize[1]//5, screenSize[1]//10))], [pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'rail', 'left', '0.png')), (screenSize[1]//5, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'rail', 'left', '1.png')), (screenSize[1]//5, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'rail', 'left', '2.png')), (screenSize[1]//5, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'rail', 'left', '3.png')), (screenSize[1]//5, screenSize[1]//10)), pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'rail', 'left', '4.png')), (screenSize[1]//5, screenSize[1]//10))]]
 		LogEntity.entityAssets = { 
 			"F1": pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'logs', 'F1.png')), (screenSize[1]//10, screenSize[1]//10)).convert_alpha(),
@@ -740,52 +864,50 @@ class GameScreen(AbstractScreen):
 				elif self.player.score < 4: 
 					self.player.score += 1 
 
-				#self.player.floating = False 
-
 
 				
 			elif (e.key == pygame.K_LEFT or e.key == pygame.K_a) and self.player.alive == True:
-				if not self.player.pendingMove == None: 
-					self.player.position = self.player.pendingMove
-					self.player.pendingMove = None   
+				if not (self.player.position[0] - (screenSize[1]//10) <= 0):
+					if not self.player.pendingMove == None: 
+						self.player.position = self.player.pendingMove
+						self.player.pendingMove = None   
 
-				self.player.position[0] -= (screenSize[1]//20)
-				self.player.state = "left_jump1"
-				self.player.animationTimer = 5
+					self.player.position[0] -= (screenSize[1]//20)
+					self.player.state = "left_jump1"
+					self.player.animationTimer = 5
 
-				self.player.pendingMove = self.player.position 
-				self.player.pendingMove[0] -= (screenSize[1]//20)
+					self.player.pendingMove = self.player.position 
+					self.player.pendingMove[0] -= (screenSize[1]//20)
 
-				#self.player.floating = False 
 
 
 
 			elif (e.key == pygame.K_DOWN or e.key == pygame.K_s) and self.player.alive == True:
-				if not self.player.pendingMove == None: 
-					self.player.position = self.player.pendingMove
-					self.player.pendingMove = None 
+				if not (self.player.position[1] + (screenSize[1]//10) >= screenSize[1]):
+					if not self.player.pendingMove == None: 
+						self.player.position = self.player.pendingMove
+						self.player.pendingMove = None 
 
-				self.player.position[1] += (screenSize[1]//20)
-				self.player.state = "backwards_jump1"
-				self.player.animationTimer = 5
+					self.player.position[1] += (screenSize[1]//20)
+					self.player.state = "backwards_jump1"
+					self.player.animationTimer = 5
 
-				self.player.pendingMove = self.player.position 
-				self.player.pendingMove[1] += (screenSize[1]//20)
-
-				#self.player.floating = False 
+					self.player.pendingMove = self.player.position 
+					self.player.pendingMove[1] += (screenSize[1]//20)
 
 
 			elif (e.key == pygame.K_RIGHT or e.key == pygame.K_d) and self.player.alive == True:
-				if not self.player.pendingMove == None: 
-					self.player.position = self.player.pendingMove
-					self.player.pendingMove = None   
+				if not (self.player.position[0] + (screenSize[1]//10) > screenSize[0]):
+					if not self.player.pendingMove == None: 
+						self.player.position = self.player.pendingMove
+						self.player.pendingMove = None   
 
-				self.player.position[0] += (screenSize[1]//20)
-				self.player.state = "right_jump1"
-				self.player.animationTimer = 5
+					self.player.position[0] += (screenSize[1]//20)
+					self.player.state = "right_jump1"
+					self.player.animationTimer = 5
 
-				self.player.pendingMove = self.player.position 
-				self.player.pendingMove[0] += (screenSize[1]//20)
+					self.player.pendingMove = self.player.position 
+					self.player.pendingMove[0] += (screenSize[1]//20)
 
 	def updateScreen(self):
 		self.player.update()
@@ -796,18 +918,7 @@ class GameScreen(AbstractScreen):
 		if isinstance(playerPosition, int): 
 			if isinstance(self.map[playerPosition], WaterRegion): 
 				if self.map[playerPosition].checkWaterDeath(self.player): 
-					self.player.dead()
-			# 	if self.map[playerPosition].checkWaterDeath(self.player): 
-			# 			if self.player.waterDeathTimer > 60:
-			# 				# self.player.dead()
-			# 				pass
-			# 			else:
-			# 				self.player.waterDeathTimer += 1
-			# 	else: 
-			# 		self.player.waterDeathTimer = 0 
-			# else: self.player.waterDeathTimer = 0
-						 
-
+					self.player.dead()		 
 
 		if self.player.state == "forwards_jump1" and self.player.animationTimer == 0:
 			self.player.position = self.player.pendingMove
@@ -848,7 +959,7 @@ class GameScreen(AbstractScreen):
 		if self.player.lives < 1: self.gameOver = True  
 
 		if self.player.animationTimer > 0: self.player.animationTimer -= 1 
-		GameScreen.timer += 1 
+		FreePlay_GameScreen.timer += 1 
 		if self.gameOver and self.fade < 125: self.fade += 5
 		elif self.fade > 0: self.fade -= 10
 		
@@ -882,10 +993,18 @@ class GameScreen(AbstractScreen):
 		elif isinstance(map[len(map)-2], SafeRegion): # Last region was Safe 
 			if chance < 25: map += WaterRegion.spawnRegion(self.mapDimensions[0])
 			elif chance < 65: map += RoadRegion.spawnRegion(self.mapDimensions[0])
-			elif chance < 95: map += RailRegion.spawnRegion(self.mapDimensions[0])
+			elif chance < 85: map += RailRegion.spawnRegion(self.mapDimensions[0])
+			elif chance < 95: map += TractorRegion.spawnRegion(self.mapDimensions[0])
 			else: map += SafeRegion.spawnRegion(self.mapDimensions[0])
 
 		elif isinstance(map[len(map)-2], RoadRegion): # Last region was Road
+			if chance < 30: map += WaterRegion.spawnRegion(self.mapDimensions[0])
+			# elif chance < 45: map += RoadRegion.spawnRegion(self.mapDimensions[0]) # 0% chance 
+			elif chance < 50: map += RailRegion.spawnRegion(self.mapDimensions[0])
+			elif chance < 80: map += TractorRegion.spawnRegion(self.mapDimensions[0])
+			else: map += SafeRegion.spawnRegion(self.mapDimensions[0])
+
+		elif isinstance(map[len(map)-2], TractorRegion): # Last region was Tractor
 			if chance < 30: map += WaterRegion.spawnRegion(self.mapDimensions[0])
 			# elif chance < 45: map += RoadRegion.spawnRegion(self.mapDimensions[0]) # 0% chance 
 			elif chance < 50: map += RailRegion.spawnRegion(self.mapDimensions[0])
@@ -895,43 +1014,196 @@ class GameScreen(AbstractScreen):
 			if chance < 25: map += WaterRegion.spawnRegion(self.mapDimensions[0])
 			elif chance < 50: map += RoadRegion.spawnRegion(self.mapDimensions[0])
 			# elif chance < 45: map += RailRegion.spawnRegion(self.mapDimensions[0]) # 0% chance 
+			elif chance < 80: map += TractorRegion.spawnRegion(self.mapDimensions[0])
 			else: map += SafeRegion.spawnRegion(self.mapDimensions[0])
 
 		elif isinstance(map[len(map)-2], WaterRegion): # Last region was Water 
 			# if chance < 45: map += WaterRegion.spawnRegion(self.mapDimensions[0]) # 0% chance 
 			if chance < 35: map += RoadRegion.spawnRegion(self.mapDimensions[0])
 			elif chance < 50: map += RailRegion.spawnRegion(self.mapDimensions[0])
+			elif chance < 80: map += TractorRegion.spawnRegion(self.mapDimensions[0])
 			else: map += SafeRegion.spawnRegion(self.mapDimensions[0])
 	
+	
+
 	def nextScreen(self):
 		if self.gameOver == True and self.fade >= 125:
+			multiplier = (random.randint(0, 100) / 100) + 1 
+			gameCoins = round(self.player.score * multiplier)
+
 			if self.playerData[2] < self.player.score: 
-				database.updatePlayer(currentPlayer, "highScoreUpdate", self.player.score)
-			database.updatePlayer(currentPlayer, "totalScoreIncrement", self.player.score)
+				database.updatePlayer(self.currentPlayer, "highScoreUpdate", self.player.score)
+			database.updatePlayer(self.currentPlayer, "totalScoreIncrement", self.player.score)
+			database.updatePlayer(self.currentPlayer, "totalGamesIncrement", 1)
+			database.updatePlayer(self.currentPlayer, "coinsAddition", gameCoins)
 			
-			return GameOverScreen()
+			return GameOverScreen(gameCoins, self.currentPlayer)
 		elif self.pause == True: 
 			self.pause = False 
 			return PausedScreen(self)
 		return self 
 
+class Progressive_GameScreen(AbstractScreen): 
+	def updateScreen(self): 
+		pass 
+
+	def drawScreen(self, screen):
+		pass
+	
+	def handleInput(self, e):
+		pass
+
+	def nextScreen(self):
+		return self
+
 class StartScreen(AbstractScreen): 
-	def __init__(self): 
-		self.startGame = False
+	def __init__(self, currentPlayer=""): 
+
+		# Change screen states
+		self.FreePlay_GameStart = False
+		self.Progressive_GameStart = False
+		self.skinsScreen = False 
+		self.statsScreen = False 
+
+		# Button locations
+		self.buttons = []
+		self.FPBtn_colour = (255, 255, 255)
+		self.PBtn_colour = (255, 255, 255)
+		self.skinsBtn_colour = (255, 255, 255)
+		self.statsBtn_colour = (255, 255, 255)
+
+		self.userInput_colour = (255, 255, 255)
+		self.userInput_colour_count = 255
+		
+		if currentPlayer == "": 
+			self.userInput = "Enter Username"
+		else: self.userInput = currentPlayer
 
 	def handleInput(self, event):
 		if event.type == pygame.KEYDOWN:
-			if not event.key == pygame.K_LSHIFT and not event.key == pygame.K_F11: self.startGame = True 
-		
-	def drawScreen(self, screen):
-		screen.fill((255, 255, 255)) 
+				if self.userInput == "Enter Username": # Reset the username box 
+					self.userInput = ""
+				
+				if event.unicode.isalpha():
+					self.userInput += e.unicode
+				elif event.key == pygame.K_BACKSPACE:
+						self.userInput = self.userInput[:-1]
+		if event.type == pygame.MOUSEBUTTONDOWN: 
+			if pygame.mouse.get_pressed() == (1, 0, 0): #LMB
+				i = 0
+				while i < len(self.buttons)-1:
+					if self.buttons[i].collidepoint(pygame.mouse.get_pos()): 
+						if i == 0: self.FreePlay_GameStart = True
+						elif i == 1: self.Progressive_GameStart = True 
+						elif i == 2: self.skinsScreen = True 
+						elif i == 3: self.statsScreen = True
+					i += 1
+	
+	def updateScreen(self):
+		self.FPBtn_colour = (255, 255, 255)
+		self.PBtn_colour = (255, 255, 255)
+		self.skinsBtn_colour = (255, 255, 255)
+		self.statsBtn_colour = (255, 255, 255)
 
-		if self.startGame == True and not fullScreen: screen = pygame.display.set_mode((screenSize[0], screenSize[1])) # Does not allow resizing during gameplay
+		i = 0 
+		while i < len(self.buttons):
+			if self.buttons[i].collidepoint(pygame.mouse.get_pos()):
+				if i == 0: self.FPBtn_colour = (175, 175, 175)
+				elif i == 1: self.PBtn_colour = (175, 175, 175)
+				elif i == 2: self.skinsBtn_colour = (175, 175, 175)
+				elif i == 3: self.statsBtn_colour = (175, 175, 175)
+			i += 1
+
+							
+	def drawScreen(self, screen):
+		screen.fill((0, 0, 0)) 
+		segmentSize = screenSize[1]//10
+
+		titleText = courierTitleFont.render("Frogger", True, (255, 255, 255))
+		screen.blit(titleText, titleText.get_rect(center=(segmentSize * 5, segmentSize * 1)))
+		usernameText = courierSubFont.render("Username: " + self.userInput, True, (self.userInput_colour))
+		screen.blit(usernameText, usernameText.get_rect(center=(segmentSize * 5, segmentSize * 2)))
+
+		FreePlay_StartButton = fixedsysSubFont.render("Free Play", True, self.FPBtn_colour)
+		FPBtn = (screen.blit(FreePlay_StartButton, FreePlay_StartButton.get_rect(center=(segmentSize * 2, segmentSize * 4))))
+		Progressive_StartButton = fixedsysSubFont.render("Progressive", True, self.PBtn_colour)
+		PBtn = (screen.blit(Progressive_StartButton, Progressive_StartButton.get_rect(center=(segmentSize * 8, segmentSize * 4))))
+		skinsButton = fixedsysSubFont.render("Skins", True, self.skinsBtn_colour)
+		skinsBtn = (screen.blit(skinsButton, skinsButton.get_rect(center=(segmentSize * 2, segmentSize * 6))))
+		statsButton = fixedsysSubFont.render("Statistics", True, self.statsBtn_colour)
+		statsBtn = (screen.blit(statsButton, statsButton.get_rect(center=(segmentSize * 8, segmentSize * 6)))) 
+		
+		if len(self.buttons) < 4: 
+			self.buttons.append(FPBtn)
+			self.buttons.append(PBtn)
+			self.buttons.append(skinsBtn)
+			self.buttons.append(statsBtn)
+		
+		if self.userInput_colour_count < 255:
+			self.userInput_colour = (255, self.userInput_colour_count, self.userInput_colour_count)
+			self.userInput_colour_count += 10
+
+		if self.FreePlay_GameStart == True and (self.userInput != "" and self.userInput != "Enter Username") and not fullScreen: screen = pygame.display.set_mode((screenSize[0], screenSize[1])) # Does not allow resizing during gameplay
 
 	def nextScreen(self):
-		if self.startGame == True: return GameScreen()
+		if (self.FreePlay_GameStart or self.Progressive_GameStart or self.skinsScreen or self.statsScreen): 
+			if (self.userInput != "" and self.userInput != "Enter Username"):
+				currentPlayer = self.userInput.lower()
+				database.initiatePlayer(currentPlayer)
+
+				if self.FreePlay_GameStart == True: return FreePlay_GameScreen(currentPlayer)
+				elif self.Progressive_GameStart == True: return Progressive_GameScreen()
+				elif self.skinsScreen == True: return skinsScreen()
+				elif self.statsScreen == True: return statsScreen()
+			else:
+				self.userInput_colour = (255, 0, 0)
+				self.userInput_colour_count	= 0
+
+				self.FreePlay_GameStart = False
+				self.Progressive_GameStart = False
+				self.skinsScreen = False 
+				self.statsScreen = False 	
+				
 		return self  
 
+class skinsScreen(AbstractScreen): 
+	def updateScreen(self): 
+		pass 
+
+	def drawScreen(self, screen):
+		pass
+	
+	def handleInput(self, e):
+		pass
+
+	def nextScreen(self):
+		return self
+
+class skinsCrate(AbstractScreen): 
+	def updateScreen(self): 
+		pass 
+
+	def drawScreen(self, screen):
+		pass
+	
+	def handleInput(self, e):
+		pass
+
+	def nextScreen(self):
+		return self
+
+class statsScreen(AbstractScreen): 
+	def updateScreen(self): 
+		pass 
+
+	def drawScreen(self, screen):
+		pass
+	
+	def handleInput(self, e):
+		pass
+
+	def nextScreen(self):
+		return self
 
 endProgram = False
 currentScreen = StartScreen()
@@ -940,8 +1212,6 @@ fullScreen = False
 resizeHeight = False
 
 database = DatabaseHandler()
-database.updatePlayer("test", "totalScoreIncrement", 50)
-currentPlayer = "default"
 
 while endProgram == False:
 	for e in pygame.event.get():
