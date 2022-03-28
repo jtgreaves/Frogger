@@ -23,7 +23,9 @@ class DatabaseHandler:
 	def loadDatabase(name):
 		conn = sqlite3.connect(name + '.db')
 		cur = conn.cursor()
+		skinTableCreated = False 
 
+		# Create playerData table
 		tb_exists = "SELECT name FROM sqlite_master WHERE type='table' AND name='playerData'"
 		tb_create = '''CREATE TABLE playerData (
 				playerName tinytext NOT NULL,
@@ -38,10 +40,95 @@ class DatabaseHandler:
 		
 		if not cur.execute(tb_exists).fetchone():
 			cur.execute(tb_create)
+		
+		# Create skinAccess table
+		tb_exists = "SELECT name FROM sqlite_master WHERE type='table' AND name='skinAccess'"
+		tb_create = '''CREATE TABLE skinAccess (
+				playerName tinytext NOT NULL,
+				skinID tinytext NOT NULL
+				);'''
+		
+		if not cur.execute(tb_exists).fetchone():
+			cur.execute(tb_create)
+			skinTableCreated = True 
+
+
+		# Create skins table
+		tb_exists = "SELECT name FROM sqlite_master WHERE type='table' AND name='skinData'"
+		tb_create = '''CREATE TABLE skinData (
+				skinID  tinytext NOT NULL,
+				cost int,
+
+				CONSTRAINT skinID PRIMARY KEY (skinID)
+				);'''
+		
+		if not cur.execute(tb_exists).fetchone():
+			cur.execute(tb_create)
 
 		conn.commit()
+
+		if skinTableCreated: 
+			DatabaseHandler.generateSkins(conn, cur)
+
 		return conn 
 	
+	def getCurrentSkin(self, name):
+		name = name.lower()
+		self.cur.execute("SELECT skin FROM playerData WHERE playerName=?", (name, ))
+		results = self.cur.fetchone()
+		return results[0]
+
+	def generateSkins(conn, cur): 
+		skinPaths = []
+		for dirs in os.listdir(os.path.join(assets_path, 'entities', 'frog')):
+			skinPaths.append(dirs) # Loops through the skin directory and adds to database
+
+		cost = 500
+		for skin in skinPaths:
+			cur.execute("INSERT INTO skinData (skinID, cost) VALUES (?, ?)", (skin, cost))
+			cost += 150
+
+		conn.commit()
+	
+	def getSkins(self):
+		self.cur.execute("SELECT skinID FROM skinData")
+		results = self.cur.fetchall()
+		return results
+
+	def checkSkinAccess(self, name, skin): 
+		name = name.lower()
+		print("!", skin)
+		self.cur.execute("SELECT skinID FROM skinAccess WHERE playerName=? and skinID=?", (name, skin ))
+		results = self.cur.fetchone()
+		if results == None: 
+			return False
+		else: 
+			return True
+
+	def addAccess(self, name, skin): 
+		name = name.lower()
+		self.cur.execute("SELECT playerName FROM skinAccess WHERE playerName=? AND skinID=?", (name, skin))
+		results = self.cur.fetchone()
+		if results == None: 
+			self.cur.execute("INSERT INTO skinAccess (playerName, skinID) VALUES (?, ?)", (name, skin))
+			self.conn.commit()
+
+	def loadSkin(self, name, skin):
+		name = name.lower()
+		self.cur.execute("UPDATE playerData SET skin=? WHERE playerName=?", (skin, name))
+		self.conn.commit()
+	
+	def fetchSkinCost(self, name):
+		name = name.lower()
+		self.cur.execute("SELECT cost FROM skinData WHERE skinID=?", (name, ))
+		results = self.cur.fetchone()
+		return results[0]
+
+	def unlockSkin(self, name, skin): 
+		name = name.lower()
+		self.cur.execute("INSERT INTO skinAccess (playerName, skinID) VALUES (?, ?)", (name, skin))
+		self.conn.commit()
+
 	def initiatePlayer(self, name):
 		name = name.lower()
 		self.cur.execute("SELECT playerName FROM playerData WHERE playerName=?", (name, ))
@@ -58,6 +145,13 @@ class DatabaseHandler:
 			return False 
 		else: 
 			return results
+	
+	def getPlayerCoins(self, name):
+		name = name.lower()
+		self.cur.execute("SELECT coins FROM playerData WHERE playerName=?", (name, ))
+		results = self.cur.fetchone()
+		return results[0]
+
 
 	def createPlayer(self, name):
 		name = name.lower()
@@ -141,6 +235,7 @@ class DatabaseHandler:
 				return False
 
 		elif intent == "coinsAddition": 
+			if value == None: return False 
 			self.cur.execute("SELECT playerName, coins FROM playerData WHERE playerName=?", (name, ))
 			results = self.cur.fetchone()
 			if results != None:
@@ -154,6 +249,7 @@ class DatabaseHandler:
 				return False
 
 		elif intent == "coinsSubtraction": 
+			if value == None: return False 
 			self.cur.execute("SELECT playerName, coins FROM playerData WHERE playerName=?", (name, ))
 			results = self.cur.fetchone()
 			if results != None:
@@ -223,8 +319,7 @@ class TractorEntity(AbstractEntity):
 				player.dead()
 
 	def drawEntity(self, pos):
-		self.rect = screen.blit(self.imageAsset, (self.x, screenSize[1] - (pos * (screenSize[1] // 10))))
-		
+		self.rect = screen.blit(self.imageAsset, (self.x, screenSize[1] - (pos * (screenSize[1] // 10))))		
 
 class CarEntity(AbstractEntity): 
 	entityAssets = []
@@ -1091,10 +1186,10 @@ class StartScreen(AbstractScreen):
 		if event.type == pygame.MOUSEBUTTONDOWN: 
 			if pygame.mouse.get_pressed() == (1, 0, 0): #LMB
 				i = 0
-				while i < len(self.buttons)-1:
+				while i < len(self.buttons):
 					if self.buttons[i].collidepoint(pygame.mouse.get_pos()): 
 						if i == 0: self.FreePlay_GameStart = True
-						elif i == 1: self.Progressive_GameStart = True 
+						elif i == 1: self.Progressive_GameStart = False # Hard coded off - not added yet 
 						elif i == 2: self.skinsScreen = True 
 						elif i == 3: self.statsScreen = True
 					i += 1
@@ -1152,9 +1247,10 @@ class StartScreen(AbstractScreen):
 				database.initiatePlayer(currentPlayer)
 
 				if self.FreePlay_GameStart == True: return FreePlay_GameScreen(currentPlayer)
-				elif self.Progressive_GameStart == True: return Progressive_GameScreen()
-				elif self.skinsScreen == True: return skinsScreen()
-				elif self.statsScreen == True: return statsScreen()
+				# elif self.Progressive_GameStart == True: return Progressive_GameScreen()
+				elif self.Progressive_GameStart == True: return self
+				elif self.skinsScreen == True: return skinsScreen(currentPlayer)
+				elif self.statsScreen == True: return statsScreen(currentPlayer)
 			else:
 				self.userInput_colour = (255, 0, 0)
 				self.userInput_colour_count	= 0
@@ -1167,17 +1263,94 @@ class StartScreen(AbstractScreen):
 		return self  
 
 class skinsScreen(AbstractScreen): 
-	def updateScreen(self): 
-		pass 
+	def __init__(self, currentPlayer=""): 
 
-	def drawScreen(self, screen):
-		pass
+		# Change screen states
+		self.mainScreen = False 
+		self.currentPlayer = currentPlayer
+
+		self.skins = []
+		self.coins = database.getPlayerCoins(currentPlayer)
+		self.currentSkin = database.getCurrentSkin(currentPlayer)
+		
+		self.balance_colour = (255, 255, 255)
+		self.balance_colour_count = 255
+
+		# Button locations
+		self.skins.append(["default", True, None])
+		for skin in database.getSkins():
+			if skin[0] != "default": 
+				if database.checkSkinAccess(currentPlayer, skin[0]): 
+					self.skins.append([skin[0], True, None])
+				else: 
+					self.skins.append([skin[0], False, database.fetchSkinCost(skin[0])])
+
+		self.assets = []
+		for skin in self.skins: 
+			self.assets.append(pygame.transform.scale(pygame.image.load(os.path.join(assets_path,'entities', 'frog', skin[0], 'forwards.png')).convert_alpha(), (screenSize[1]//5, screenSize[1]//5)))
+
+		self.buttons = []
+
+	def handleInput(self, event):
+		if event.type == pygame.KEYDOWN:
+			if event.key == pygame.K_BACKSLASH or event.key == pygame.K_ESCAPE or event.key == pygame.K_RETURN: 
+				self.mainScreen = True 
+		if event.type == pygame.MOUSEBUTTONDOWN: 
+			if pygame.mouse.get_pressed() == (1, 0, 0): #LMB
+				i = 0
+				while i < len(self.buttons)-1:
+					if self.buttons[i].collidepoint(pygame.mouse.get_pos()): 
+						if self.skins[i][1] == True:
+							database.updatePlayer(self.currentPlayer, "currentSkin", self.skins[i][0])
+							self.currentSkin = self.skins[i][0]
+
+						elif self.coins >= self.skins[i][2]: 
+							print(self.skins[i])
+							database.unlockSkin(self.currentPlayer, self.skins[i][0])
+							database.updatePlayer(self.currentPlayer, "currentSkin", self.skins[i][0])
+							database.updatePlayer(self.currentPlayer, "coinsSubtraction", self.skins[i][2])
+							self.currentSkin = self.skins[i][0]
+							self.coins -= self.skins[i][2]
+							self.skins[i][2] = None
+							self.skins[i][1] = True
+						
+						else:
+							self.balance_colour = (255, 0, 0)
+							self.balance_colour_count = 0
+
+						
+					i += 1
 	
-	def handleInput(self, e):
-		pass
+	def updateScreen(self):
+		if self.balance_colour_count < 255:
+			self.balance_colour = (255, self.balance_colour_count, self.balance_colour_count)
+			self.balance_colour_count += 10
+
+				
+	def drawScreen(self, screen):
+		screen.fill((0, 0, 0)) 
+		segmentSize = screenSize[1]//5
+
+		titleText = courierTitleFont.render("Skins", True, (255, 255, 255))
+		screen.blit(titleText, titleText.get_rect(center=(segmentSize * 2.5, segmentSize * 0.5)))
+		balanceText = courierSubFont.render("Balance: " + str(self.coins), True, self.balance_colour)
+		screen.blit(balanceText, balanceText.get_rect(center=(segmentSize * 2.5, segmentSize * 0.75)))
+
+		for skin in range(0, len(self.skins)):
+			x = (skin % 3) * segmentSize
+			y = (skin // 3) * segmentSize
+			button = screen.blit(self.assets[skin], (x + segmentSize, y + segmentSize))
+			if not self.skins[skin][1]: 
+				costText = courierSubFont.render(str(self.skins[skin][2]), True, (255, 255, 255))
+				screen.blit(costText, costText.get_rect(center=(x + segmentSize*1.5, y + segmentSize*2)))
+
+			if len(self.buttons) < len(self.skins) + 1:
+				self.buttons.append(button)
 
 	def nextScreen(self):
-		return self
+		if self.mainScreen == True: return StartScreen(self.currentPlayer)
+		
+		return self  
 
 class skinsCrate(AbstractScreen): 
 	def updateScreen(self): 
@@ -1193,16 +1366,37 @@ class skinsCrate(AbstractScreen):
 		return self
 
 class statsScreen(AbstractScreen): 
+	def __init__(self, currentPlayer=""): 
+		self.currentPlayer = currentPlayer
+		self.playerData = database.loadPlayer(currentPlayer)
+		self.mainScreen = False
+
 	def updateScreen(self): 
 		pass 
 
 	def drawScreen(self, screen):
-		pass
-	
+		screen.fill((0, 0, 0))
+		segmentSize = screenSize[1]//5
+
+		titleText = courierTitleFont.render("Stats", True, (255, 255, 255))
+		screen.blit(titleText, titleText.get_rect(center=(segmentSize * 2.5, segmentSize * 0.5)))
+
+		totalScoreText = courierSubFont.render("Total Score: " + str(self.playerData[1]), True, (255, 255, 255))
+		screen.blit(totalScoreText, totalScoreText.get_rect(center=(segmentSize * 2.5, segmentSize * 0.75)))
+		highScoreText = courierSubFont.render("High Score: " + str(self.playerData[2]), True, (255, 255, 255))
+		screen.blit(highScoreText, highScoreText.get_rect(center=(segmentSize * 2.5, segmentSize * 1)))
+		coinsText = courierSubFont.render("Coins: " + str(self.playerData[4]), True, (255, 255, 255))
+		screen.blit(coinsText, coinsText.get_rect(center=(segmentSize * 2.5, segmentSize * 1.25)))
+		totalGamesText = courierSubFont.render("Total Games: " + str(self.playerData[5]), True, (255, 255, 255))
+		screen.blit(totalGamesText, totalGamesText.get_rect(center=(segmentSize * 2.5, segmentSize * 1.5)))
+
 	def handleInput(self, e):
-		pass
+		if e.type == pygame.KEYDOWN:
+			if e.key == pygame.K_BACKSLASH or e.key == pygame.K_ESCAPE or e.key == pygame.K_RETURN: 
+				self.mainScreen = True
 
 	def nextScreen(self):
+		if self.mainScreen == True: return StartScreen(self.currentPlayer)
 		return self
 
 endProgram = False
